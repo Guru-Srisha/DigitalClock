@@ -16,8 +16,8 @@ DateTime now;
 #define BUTTON_PIN D0
 
 // WiFi CREDENTIALS HERE
-const char* ssid = "Glyph";
-const char* password = "23456789";
+const char* ssid = "";
+const char* password = "";
 
 // IST Timezone
 const char* timeServer = "http://worldtimeapi.org/api/timezone/Asia/Kolkata";

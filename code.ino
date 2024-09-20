@@ -13,6 +13,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 RTC_DS3231 rtc;
 DateTime now;
 
+#define BUTTON_PIN D0
+
 // WiFi CREDENTIALS HERE
 const char* ssid = "Glyph";
 const char* password = "23456789";
@@ -20,9 +22,12 @@ const char* password = "23456789";
 // IST Timezone
 const char* timeServer = "http://worldtimeapi.org/api/timezone/Asia/Kolkata";
 
+bool buttonPressed = false;
+unsigned long wifiRetryTimeout = 10000;
+
 void setup() {
   Serial.begin(115200);
-  
+
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println(F("SSD1306 allocation failed"));
     for (;;);
@@ -38,8 +43,10 @@ void setup() {
 
   if (rtc.lostPower()) {
     Serial.println("RTC lost power, setting time!");
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));  // Set RTC to compile time if power is lost
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   connectToWiFi();
 }
@@ -48,8 +55,25 @@ void loop() {
   now = rtc.now();
   displayTime(now);
 
-  if (WiFi.status() == WL_CONNECTED) {
-    updateTimeFromCloud();
+  if (digitalRead(BUTTON_PIN) == LOW && !buttonPressed) {
+    buttonPressed = true;
+
+    if (WiFi.status() == WL_CONNECTED) {
+      updateTimeFromCloud();
+    } 
+    else {
+      Serial.println("Wi-Fi not connected, attempting to reconnect...");
+      if (attemptReconnect()) {
+        Serial.println("Reconnected! Updating time from cloud...");
+        updateTimeFromCloud();
+      } else {
+        Serial.println("Failed to reconnect. Continuing with current RTC time.");
+      }
+    }
+  }
+
+  if (digitalRead(BUTTON_PIN) == HIGH) {
+    buttonPressed = false;
   }
 
   delay(1000);
@@ -74,7 +98,7 @@ void displayTime(DateTime currentTime) {
 
   int xPos = (SCREEN_WIDTH - (24 * 5)) / 2;
   int yPos = (SCREEN_HEIGHT - 32) / 2;
-  
+
   display.setCursor(xPos, yPos);
   display.printf("%02d:%02d", hour, currentTime.minute());
 
@@ -91,7 +115,6 @@ void updateTimeFromCloud() {
     HTTPClient http;
 
     http.begin(client, timeServer);
-
     int httpCode = http.GET();
 
     if (httpCode > 0) {
@@ -100,7 +123,7 @@ void updateTimeFromCloud() {
 
       DynamicJsonDocument doc(1024);
       deserializeJson(doc, payload);
-      
+
       const char* datetime = doc["datetime"];
       Serial.println(datetime);
 
@@ -108,43 +131,38 @@ void updateTimeFromCloud() {
       sscanf(datetime, "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month, &day, &hour, &minute, &second);
 
       rtc.adjust(DateTime(year, month, day, hour, minute, second));
-      Serial.println("RTC time updated from cloud");
+      Serial.println("RTC time updated from cloud.");
 
     } else {
-      Serial.println("Failed to fetch time from the server");
+      Serial.println("Failed to fetch time from the server.");
     }
 
     http.end();
   } else {
-    Serial.println("Not connected to WiFi");
+    Serial.println("Not connected to Wi-Fi.");
   }
 }
 
 void connectToWiFi() {
-  display.clearDisplay();
-  display.setTextSize(5);
-  display.setTextColor(WHITE);
-
-  int xPos = (SCREEN_WIDTH - (30 * 3)) / 2;
-  int yPos = (SCREEN_HEIGHT - 40) / 2;
-  display.setCursor(xPos, yPos);
-  display.println("?_?");
-  display.display();
-
+  Serial.println("Connecting to Wi-Fi...");
   WiFi.begin(ssid, password);
+
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
 
-  Serial.println("Connected to WiFi");
+  Serial.println("\nWi-Fi Connected.");
+}
 
-  display.clearDisplay();
-  
-  xPos = (SCREEN_WIDTH - (30 * 3)) / 2;
-  yPos = (SCREEN_HEIGHT - 40) / 2;
-  display.setCursor(xPos, yPos);
-  display.println("!_!");
-  display.display();
-  delay(1000);
+bool attemptReconnect() {
+  unsigned long startTime = millis();
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED && millis() - startTime < wifiRetryTimeout) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  return WiFi.status() == WL_CONNECTED;
 }
